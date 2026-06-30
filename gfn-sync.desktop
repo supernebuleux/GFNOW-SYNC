@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Name=GFN Sync
+GenericName=GeForce NOW → Steam
+Comment=Synchronise ta bibliothèque GeForce NOW avec Steam
+Exec=bash -c "$HOME/gfn-sync/gfn-sync.sh"
+Icon=nvidia-settings
+Type=Application
+Categories=Game;Utility;
+Terminal=false
