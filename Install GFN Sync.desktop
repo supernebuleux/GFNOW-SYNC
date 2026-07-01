@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Installer GFN Sync
+Comment=Double-cliquez pour installer GFN Sync sur SteamOS
+Icon=utilities-terminal
+Exec=bash -c 'cd "$(dirname "$(readlink -f "%k")")" && bash install.sh'
+Terminal=true
+Categories=Utility;

@@ -32,7 +32,8 @@ from gfn_common import (
 
 def find_gfn_shortcuts(shortcuts):
     """
-    Trouve tous les raccourcis avec le tag "GeForce NOW".
+    Trouve tous les raccourcis JEUX avec le tag "GeForce NOW".
+    Exclut le lanceur GFN lui-même (pas de cmsId / --direct-start).
     Retourne une liste de (index_key, app_name, appid).
     """
     gfn_shortcuts = []
@@ -45,12 +46,16 @@ def find_gfn_shortcuts(shortcuts):
                     is_gfn = True
                     break
         # Fallback : vérifier les LaunchOptions
+        launch_opts = shortcut.get("LaunchOptions", "")
         if not is_gfn:
-            launch_opts = shortcut.get("LaunchOptions", "")
             if "--direct-start" in launch_opts and "flatpak" in shortcut.get("exe", ""):
                 is_gfn = True
 
         if is_gfn:
+            # Protéger le lanceur GFN lui-même (pas de cmsId = c'est l'app, pas un jeu)
+            has_game_id = "cmsId=" in launch_opts or "--direct-start" in launch_opts
+            if not has_game_id:
+                continue
             app_name = shortcut.get("AppName", f"Inconnu ({idx})")
             appid = shortcut.get("appid", 0)
             gfn_shortcuts.append((idx, app_name, appid))
@@ -66,14 +71,19 @@ def delete_artworks(grid_dir, appid):
     patterns = [
         f"{appid_unsigned}.png",
         f"{appid_unsigned}.jpg",
+        f"{appid_unsigned}.webp",
         f"{appid_unsigned}_hero.png",
         f"{appid_unsigned}_hero.jpg",
+        f"{appid_unsigned}_hero.webp",
         f"{appid_unsigned}_logo.png",
         f"{appid_unsigned}_logo.jpg",
+        f"{appid_unsigned}_logo.webp",
         f"{appid_unsigned}_icon.png",
         f"{appid_unsigned}_icon.jpg",
+        f"{appid_unsigned}_icon.webp",
         f"{appid_unsigned}p.png",
         f"{appid_unsigned}p.jpg",
+        f"{appid_unsigned}p.webp",
     ]
     deleted = 0
     for pattern in patterns:

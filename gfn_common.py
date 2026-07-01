@@ -228,6 +228,25 @@ def _extract_from_cachestorage(cachestorage_dir):
                     if banner_match:
                         images["banner"] = banner_match.group(1)
 
+                    # Additional image types (generic capture)
+                    extra_img_pattern = re.finditer(
+                        r'"(\w*(?:BOX_ART|KEY_ART|LOGO|TILE|ICON|STORE_IMAGE|SMALL_IMAGE)\w*)"'
+                        r'\s*:\s*"(https?://[^"]+)"',
+                        part,
+                        re.IGNORECASE,
+                    )
+                    for img_match in extra_img_pattern:
+                        key = img_match.group(1).lower()
+                        url = img_match.group(2)
+                        if "box" in key or "key" in key:
+                            images.setdefault("boxArt", url)
+                        elif "logo" in key:
+                            images.setdefault("logo", url)
+                        elif "tile" in key or "small" in key:
+                            images.setdefault("tile", url)
+                        elif "icon" in key:
+                            images.setdefault("icon", url)
+
                     # Find variants with selected=true
                     variant_pattern = re.compile(
                         r'"id"\s*:\s*"(\d+)"\s*,'
@@ -418,6 +437,7 @@ def write_binary_vdf(vdf_dict):
     out.append(0)
     write_string(root_key)
     write_map(vdf_dict[root_key])
+    out.append(8)  # Root-level end marker (requis par Steam)
     return bytes(out)
 
 
@@ -696,7 +716,7 @@ def restart_steam():
 
 
 # ──────────────────────────────────────────────
-# SteamGridDB (optionnel)
+# SteamGridDB (optionnel — fallback)
 # ──────────────────────────────────────────────
 def load_steamgriddb_key():
     """Charge la clé API SteamGridDB depuis le fichier de config."""
@@ -743,3 +763,330 @@ def download_file(url, dest_path):
         return True
     except Exception:
         return False
+
+
+# ──────────────────────────────────────────────
+# Artworks natifs GFN (sans clé API)
+# ──────────────────────────────────────────────
+
+# Constantes du format Chromium Simple Cache
+_SIMPLE_CACHE_INITIAL_MAGIC = 0xFCFB6D1BA7725C30
+_SIMPLE_CACHE_EOF_MAGIC = 0xF4FA6F45970D41D8
+
+
+def get_gfn_cache_base_dir(flatpak_id):
+    """Retourne le répertoire de base du cache CEF pour le Flatpak GFN."""
+    candidates = [
+        f"~/.var/app/{flatpak_id}/.local/state/NVIDIA/GeForceNOW/CefCache/Default",
+        f"~/.var/app/{flatpak_id}/config/GeForceNOW/CefCache/Default",
+    ]
+    for path in candidates:
+        expanded = os.path.expanduser(path)
+        if os.path.exists(expanded):
+            return expanded
+    return None
+
+
+def _detect_image_format(data):
+    """Détecte le format d'image depuis les magic bytes. Retourne l'extension ou None."""
+    if not data or len(data) < 12:
+        return None
+    if data[:3] == b'\xff\xd8\xff':
+        return '.jpg'
+    if data[:8] == b'\x89PNG\r\n\x1a\n':
+        return '.png'
+    if data[:4] == b'RIFF' and data[8:12] == b'WEBP':
+        return '.webp'
+    return None
+
+
+def _parse_simple_cache_entry(filepath):
+    """
+    Parse un fichier d'entrée Chromium Simple Cache.
+    Retourne (url_key, body_bytes) ou (None, None).
+
+    Format Simple Cache (fichier _0) :
+      SimpleFileHeader(20) | Key(key_length) | Stream1=body | Stream0=headers | ... | EOF(s)
+    """
+    try:
+        with open(filepath, 'rb') as f:
+            data = f.read()
+
+        if len(data) < 24:
+            return None, None
+
+        # Parse SimpleFileHeader : magic(8) + version(4) + key_length(4) + key_hash(4)
+        magic = struct.unpack('<Q', data[:8])[0]
+        if magic != _SIMPLE_CACHE_INITIAL_MAGIC:
+            return None, None
+
+        _version, key_length, _key_hash = struct.unpack('<III', data[8:20])
+
+        if key_length == 0 or key_length > 8192:
+            return None, None
+
+        key_end = 20 + key_length
+        if key_end >= len(data):
+            return None, None
+
+        url_key = data[20:key_end].decode('utf-8', errors='ignore')
+
+        # Le body (stream 1) commence juste après la clé
+        body_start = key_end
+        body_data = None
+
+        # Lire le SimpleFileEOF (les 20 derniers octets du fichier)
+        # Dans le format Simple Cache Chromium, file_0 a UN seul EOF pour
+        # le stream 0 (headers HTTP). Le stream 1 (body) se déduit par calcul.
+        # Layout: [Header:20][Key][Stream1=body][Stream0=headers][SHA256?][EOF:20]
+        if len(data) >= key_end + 20:
+            eof_offset = len(data) - 20
+            eof_magic = struct.unpack('<Q', data[eof_offset:eof_offset + 8])[0]
+            if eof_magic == _SIMPLE_CACHE_EOF_MAGIC:
+                eof_flags = struct.unpack('<I', data[eof_offset + 8:eof_offset + 12])[0]
+                stream0_size = struct.unpack('<I', data[eof_offset + 16:eof_offset + 20])[0]
+                sha256_size = 32 if (eof_flags & 2) else 0
+                # stream1_size = total - header - key - stream0 - sha256 - eof
+                stream1_size = len(data) - 20 - key_length - stream0_size - sha256_size - 20
+                if 0 < stream1_size <= (len(data) - body_start):
+                    body_data = data[body_start:body_start + stream1_size]
+
+        # Fallback : détection par magic bytes si le parsing EOF échoue
+        if body_data is None and body_start < len(data):
+            remaining = data[body_start:]
+            if _detect_image_format(remaining):
+                eof_marker = struct.pack('<Q', _SIMPLE_CACHE_EOF_MAGIC)
+                eof_pos = remaining.rfind(eof_marker)
+                if eof_pos > 0:
+                    body_data = remaining[:eof_pos]
+                else:
+                    body_data = remaining
+
+        return url_key, body_data
+
+    except Exception:
+        return None, None
+
+
+def _extract_images_from_cache(cache_base_dir):
+    """
+    Extrait les images depuis le cache Chromium de GFN (HTTP Cache + CacheStorage).
+    Retourne un dict : { url: image_bytes }
+    """
+    images = {}
+
+    scan_dirs = []
+    # HTTP Cache (les images sont probablement cachées ici)
+    http_cache = os.path.join(cache_base_dir, "Cache", "Cache_Data")
+    if os.path.exists(http_cache):
+        scan_dirs.append(http_cache)
+    # CacheStorage du Service Worker
+    cs_dir = os.path.join(cache_base_dir, "Service Worker", "CacheStorage")
+    if os.path.exists(cs_dir):
+        scan_dirs.append(cs_dir)
+
+    skip_filenames = {'index', 'index-dir', '00index', 'the-real-index'}
+
+    for scan_dir in scan_dirs:
+        for root, _, files in os.walk(scan_dir):
+            for filename in files:
+                if filename in skip_filenames:
+                    continue
+                filepath = os.path.join(root, filename)
+                try:
+                    fsize = os.path.getsize(filepath)
+                    # Ignorer les fichiers trop petits (<1 Ko) ou trop gros (>10 Mo)
+                    if fsize < 1024 or fsize > 10 * 1024 * 1024:
+                        continue
+                except OSError:
+                    continue
+
+                url_key, body_data = _parse_simple_cache_entry(filepath)
+                if url_key and body_data and _detect_image_format(body_data):
+                    images[url_key] = body_data
+
+    return images
+
+
+def fetch_native_artworks(user_dir, created_entries, appid_map, all_games, flatpak_id):
+    """
+    Récupère les artworks en utilisant les sources natives GFN (sans clé API).
+
+    Stratégie à 2 niveaux :
+      Niveau 1 : Extraction depuis le cache local Chromium (100% offline)
+      Niveau 2 : Téléchargement depuis le CDN NVIDIA via les URLs déjà extraites (online, gratuit)
+
+    Retourne (nb_images_total, liste_jeux_sans_artwork).
+    """
+    grid_dir = get_grid_dir(user_dir)
+    total_count = 0
+    total_games = len(created_entries)
+    missing_art_games = set()
+    no_url_count = 0
+
+    # ── Niveau 1 : Construire un cache d'images locales ──
+    cache_base = get_gfn_cache_base_dir(flatpak_id)
+    local_images = {}
+    if cache_base:
+        print("  [*] Scan du cache local pour les images...", flush=True)
+        local_images = _extract_images_from_cache(cache_base)
+        if local_images:
+            print(f"  [✓] {len(local_images)} images trouvées dans le cache local")
+        else:
+            print("  [~] Aucune image dans le cache local, passage au CDN NVIDIA")
+
+    for i, (app_name, _) in enumerate(created_entries, 1):
+        appid = appid_map.get(app_name)
+        if not appid:
+            continue
+
+        appid_unsigned = appid & 0xFFFFFFFF
+
+        # Trouver les infos du jeu
+        game_info = None
+        for _gid, info in all_games.items():
+            if info["title"] == app_name:
+                game_info = info
+                break
+
+        if not game_info:
+            missing_art_games.add(app_name)
+            continue
+
+        images_urls = game_info.get("images", {})
+        count = 0
+
+        # Construire la liste des artworks à récupérer
+        # Chaque élément : (url, basename_sans_ext)
+        artwork_tasks = []
+
+        hero_url = images_urls.get("hero")
+        banner_url = images_urls.get("banner")
+
+        if hero_url:
+            artwork_tasks.append((hero_url, f"{appid_unsigned}_hero"))
+            artwork_tasks.append((hero_url, f"{appid_unsigned}"))
+
+        if banner_url:
+            artwork_tasks.append((banner_url, f"{appid_unsigned}p"))
+
+        # Types supplémentaires si disponibles dans les données du cache
+        for img_key, basename_suffix in [
+            ("boxArt", f"{appid_unsigned}p"),
+            ("keyArt", f"{appid_unsigned}p"),
+            ("logo", f"{appid_unsigned}_logo"),
+            ("tile", f"{appid_unsigned}"),
+            ("icon", f"{appid_unsigned}_icon"),
+        ]:
+            url = images_urls.get(img_key)
+            if url:
+                artwork_tasks.append((url, basename_suffix))
+
+        if not artwork_tasks:
+            missing_art_games.add(app_name)
+            no_url_count += 1
+            continue
+
+        print(f"  [{i}/{total_games}] {app_name}...", end="", flush=True)
+
+        # Cache local des téléchargements pour éviter de re-télécharger la même URL
+        download_cache = {}
+        seen_basenames = set()
+
+        for url, basename in artwork_tasks:
+            # Dédupliquer les basenames (ex: boxArt et banner → même fichier portrait)
+            if basename in seen_basenames:
+                continue
+            seen_basenames.add(basename)
+
+            # Vérifier si un fichier existe déjà (avec n'importe quelle extension)
+            already_exists = False
+            for ext in ('.png', '.jpg', '.jpeg', '.webp'):
+                if os.path.exists(os.path.join(grid_dir, basename + ext)):
+                    already_exists = True
+                    count += 1
+                    break
+
+            if already_exists:
+                continue
+
+            saved = False
+
+            # Niveau 1 : Cache local
+            if not saved and url in local_images:
+                img_data = local_images[url]
+                ext = _detect_image_format(img_data) or '.jpg'
+                dest = os.path.join(grid_dir, basename + ext)
+                try:
+                    with open(dest, 'wb') as f:
+                        f.write(img_data)
+                    saved = True
+                    count += 1
+                except Exception:
+                    pass
+
+            # Niveau 2 : Téléchargement depuis le CDN NVIDIA
+            if not saved and url:
+                # Réutiliser un téléchargement précédent de la même URL
+                if url in download_cache:
+                    img_data = download_cache[url]
+                    ext = _detect_image_format(img_data) or '.jpg'
+                    dest = os.path.join(grid_dir, basename + ext)
+                    try:
+                        with open(dest, 'wb') as f:
+                            f.write(img_data)
+                        saved = True
+                        count += 1
+                    except Exception:
+                        pass
+                else:
+                    # Déterminer l'extension depuis l'URL
+                    url_path = url.lower().split('?')[0]
+                    if url_path.endswith('.png'):
+                        ext = '.png'
+                    elif url_path.endswith('.webp'):
+                        ext = '.webp'
+                    else:
+                        ext = '.jpg'
+
+                    dest = os.path.join(grid_dir, basename + ext)
+                    if download_file(url, dest):
+                        try:
+                            with open(dest, 'rb') as f:
+                                img_data = f.read()
+
+                            # Valider que le fichier est une image réelle
+                            detected_ext = _detect_image_format(img_data)
+                            if not detected_ext or len(img_data) < 100:
+                                # Fichier vide, corrompu ou pas une image
+                                os.remove(dest)
+                                continue
+
+                            download_cache[url] = img_data
+
+                            # Corriger l'extension si le format réel diffère
+                            if detected_ext != ext:
+                                new_dest = os.path.join(grid_dir, basename + detected_ext)
+                                os.rename(dest, new_dest)
+                        except Exception:
+                            # Nettoyage en cas d'erreur
+                            if os.path.exists(dest):
+                                try:
+                                    os.remove(dest)
+                                except OSError:
+                                    pass
+                            continue
+                        saved = True
+                        count += 1
+
+        if count > 0:
+            total_count += count
+            print(f" ✓ ({count} images)")
+        else:
+            missing_art_games.add(app_name)
+            print(" ✗ (échec téléchargement)")
+
+    if no_url_count > 0:
+        print(f"  [~] {no_url_count} jeu(x) sans URLs d'images dans le cache GFN")
+
+    return total_count, missing_art_games

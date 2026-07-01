@@ -19,7 +19,7 @@ GFN games appear as non-Steam shortcuts in your Steam library, categorized under
 - 📚 **Library extraction** from GFN's CacheStorage (official) and LevelDB (community)
 - 🎯 **Smart selection** — 2-step wizard: filter by store (Steam, Epic, Ubisoft...), then pick individual games
 - 🚀 **Direct launch** — games start directly in GeForce NOW via `--url-route` (no extra clicks)
-- 🖼️ **Artworks** — optional SteamGridDB integration for game covers, heroes, logos & icons
+- 🖼️ **Native artworks** — game covers, heroes & logos extracted directly from the GFN cache and NVIDIA CDN (no API key needed)
 - 🏷️ **Categorized** — all shortcuts tagged "GeForce NOW" for easy filtering in Steam
 - 🧹 **Cleanup tool** — selectively remove GFN shortcuts and their artworks
 - 🎮 **Steam Input fix** — enables controller passthrough for special peripherals (Yoke, HOTAS...)
@@ -30,33 +30,30 @@ GFN games appear as non-Steam shortcuts in your Steam library, categorized under
 
 ## 📦 Installation
 
-### Quick Install (recommended)
+### Option A — Téléchargement direct (recommandé, aucune commande)
 
-On your Steam Deck / SteamOS device, open **Konsole** and run:
+1. Allez sur [**Releases**](https://github.com/supernebuleux/GFNOW-SYNC/releases) et téléchargez `GFNOW-SYNC.tar.gz`
+2. **Clic-droit** sur le fichier → **Extraire ici** (l'extracteur Ark de KDE crée un dossier `gfn-sync/`)
+3. Ouvrez le dossier `gfn-sync/`
+4. **Double-cliquez** sur **`Install GFN Sync`** (l'icône en forme de terminal)
+5. L'installation se lance dans Konsole. C'est fini ✅
+
+> [!TIP]
+> **Où retrouver l'app après installation ?**
+>
+> #### En mode Bureau (Desktop Mode)
+> Cliquez sur le **menu KDE** (coin bas-gauche) → tapez **« GFN Sync »** dans la barre de recherche → cliquez sur l'app.
+>
+> #### En mode Gaming (Game Mode)
+> L'app n'apparaît pas dans Game Mode. Lancez-la depuis le **mode Bureau**, puis retournez en Game Mode : vos jeux GFN seront dans votre bibliothèque Steam sous la catégorie **« GeForce NOW »**.
+
+### Option B — Via Git (pour développeurs)
 
 ```bash
 git clone https://github.com/supernebuleux/GFNOW-SYNC.git
 cd GFNOW-SYNC
 bash install.sh
 ```
-
-This copies the files to `~/gfn-sync/` and adds a **GFN Sync** shortcut to your app menu.
-
-### Manual Install
-
-If you prefer not to use the installer:
-
-```bash
-git clone https://github.com/supernebuleux/GFNOW-SYNC.git
-cd GFNOW-SYNC
-mkdir -p ~/gfn-sync
-cp -r gfn_common.py gfn_sync_library.py gfn_cleanup.py gfn_steam_input_fix.py gfn-sync.sh vdf/ ~/gfn-sync/
-chmod +x ~/gfn-sync/gfn-sync.sh ~/gfn-sync/*.py
-```
-
-### Download without Git
-
-Go to [**Releases**](https://github.com/supernebuleux/GFNOW-SYNC/releases) and download the latest `.tar.gz`, then extract and run `install.sh`.
 
 ---
 
@@ -77,45 +74,35 @@ Go to [**Releases**](https://github.com/supernebuleux/GFNOW-SYNC/releases) and d
 
 ## 🚀 Usage
 
-### From the app menu
+### From the app menu (recommended)
 
-After installation, search for **"GFN Sync"** in the KDE app menu. A menu will appear with the following options:
+After installation, open the **KDE app menu** (bottom-left corner) and search for **"GFN Sync"**.
+
+A menu will appear with three options:
+
+| Option | Description |
+|---|---|
+| 🔄 **Sync Library** | Interactive wizard to add GFN games to Steam |
+| 🧹 **Cleanup** | Remove GFN shortcuts from Steam |
+| 🎮 **Fix Steam Input** | Enable controller passthrough (Yoke, HOTAS...) |
 
 ### From the terminal
 
 ```bash
 cd ~/gfn-sync
+python3 gfn_sync_library.py   # Sync
+python3 gfn_cleanup.py         # Cleanup
+python3 gfn_steam_input_fix.py # Steam Input fix
 ```
 
-#### 1. Sync Library
+### Sync wizard walkthrough
 
-```bash
-python3 gfn_sync_library.py
-```
-
-Interactive wizard:
 1. Detects your GeForce NOW client
 2. Extracts your game library from the GFN cache
 3. Lets you filter by store (Steam, Epic, Ubisoft, Xbox, EA, GOG...)
 4. Lets you pick individual games
-5. Closes Steam, writes the shortcuts, optionally downloads artworks
-6. Restarts Steam
-
-#### 2. Cleanup Shortcuts
-
-```bash
-python3 gfn_cleanup.py
-```
-
-Remove GFN shortcuts from Steam selectively or in bulk. Also cleans up associated artwork files.
-
-#### 3. Fix Steam Input (Yoke / HOTAS)
-
-```bash
-python3 gfn_steam_input_fix.py
-```
-
-Grants udev permissions to the GFN Flatpak so Steam Input can translate special controllers (Yoke, HOTAS, racing wheels...) into Xbox-compatible inputs for GeForce NOW.
+5. Closes Steam, writes the shortcuts, downloads artworks automatically
+6. Restarts Steam — your games are ready 🎮
 
 ---
 
@@ -131,6 +118,15 @@ The official GeForce NOW client stores your library in the **CacheStorage** of i
 ```
 
 GFN Sync scans these binary files, extracts JSON game data, and filters for games with `"selected": true` (= in your library).
+
+### Native Artworks (zero API key)
+
+Game covers are retrieved automatically in two stages:
+
+1. **Local cache extraction** — images are carved directly from the Chromium Simple Cache binary files (100% offline)
+2. **NVIDIA CDN download** — image URLs extracted from the GFN data are fetched from NVIDIA's servers (free, no account needed)
+
+No SteamGridDB API key, no developer account — it just works.
 
 ### Direct Launch
 
@@ -152,7 +148,7 @@ Shortcuts are written to `shortcuts.vdf` using **signed int32** encoding (critic
 ## 🗂️ Project Structure
 
 ```
-GFNOW-SYNC/
+gfn-sync/
 ├── gfn_common.py            # Shared backend: extraction, VDF, GUI, Steam management
 ├── gfn_sync_library.py      # Main sync wizard
 ├── gfn_cleanup.py           # Shortcut removal tool
@@ -160,6 +156,7 @@ GFNOW-SYNC/
 ├── gfn-sync.sh              # Bash launcher menu
 ├── gfn-sync.desktop         # KDE app menu entry
 ├── install.sh               # SteamOS installer
+├── Install GFN Sync.desktop # Double-click installer (for archives)
 ├── vdf/                     # Embedded binary VDF module (zero dependencies)
 │   ├── __init__.py
 │   └── vdict.py
@@ -173,10 +170,11 @@ GFNOW-SYNC/
 
 | Problem | Solution |
 |---|---|
+| *"GFN Sync" doesn't appear in menu* | Run `chmod +x ~/.local/share/applications/gfn-sync.desktop` then log out/in, or search "GFN" in the KDE menu |
 | *"GeForce NOW cache not found"* | Open GFN app, browse your Library tab, close it, retry |
 | *"No games found"* | Check that your stores are linked in GFN (Settings → Connections) |
 | *Shortcuts don't appear in Steam* | Make sure Steam was closed before running the script. Restart Steam |
-| *Missing game artwork* | Use [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) + SteamGridDB plugin, or provide a SteamGridDB API key when prompted |
+| *Missing game artwork* | Artworks are downloaded automatically from GFN cache/CDN. If some are missing, you can add custom images manually in `~/.steam/steam/userdata/<id>/config/grid/` |
 | *Controller not working in GFN* | Run `gfn_steam_input_fix.py`, then configure the controller mapping in Steam's controller settings for the game |
 | *"Permission denied"* | Run `chmod +x ~/gfn-sync/*.py ~/gfn-sync/gfn-sync.sh` |
 | *kdialog not available* | Normal on non-KDE systems. The terminal fallback works identically |
@@ -197,8 +195,8 @@ The sync script is **idempotent** — run it as many times as you want:
 | Version | Status | Highlights |
 |---|---|---|
 | **v1.0** | ✅ Done | Full sync, direct launch, interactive wizard, installer |
-| **v1.1** | 🔜 Next | Auto artworks, custom icon, incremental sync, uninstaller |
-| **v1.2** | 📋 Planned | Game Mode launcher, Steam notifications, auto-sync cron |
+| **v1.1** | ✅ Done | Native artworks (zero API key), double-click installer |
+| **v1.2** | 🔜 Next | Game Mode launcher, incremental sync, uninstaller |
 | **v2.0** | 💡 Future | Multi-backend (community + browser), multi-profile, import/export |
 
 ---
@@ -226,7 +224,7 @@ Contributions are welcome! Feel free to:
 GFN Sync synchronise automatiquement ta bibliothèque GeForce NOW avec Steam sur SteamOS.
 Tes jeux GFN apparaissent comme raccourcis non-Steam, catégorisés « GeForce NOW », et se lancent directement dans le jeu via le client officiel NVIDIA.
 
-Pour l'installation, clone le repo et lance `bash install.sh` depuis Konsole en mode Bureau.
+**Installation sans ligne de commande :** télécharge l'archive depuis [Releases](https://github.com/supernebuleux/GFNOW-SYNC/releases), extrais, double-clique sur « Install GFN Sync ». Ensuite, cherche « GFN Sync » dans le menu KDE (coin bas-gauche).
 
 ---
 

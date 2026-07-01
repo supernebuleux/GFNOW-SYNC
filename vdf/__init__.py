@@ -91,4 +91,5 @@ def binary_dumps(obj):
     buf.write(bytes([BIN_NONE]))
     _write_string(root_key)
     _write_map(obj[root_key])
+    buf.write(bytes([BIN_END]))  # Root-level end marker (requis par Steam)
     return buf.getvalue()

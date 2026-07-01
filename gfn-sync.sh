@@ -36,13 +36,13 @@ if command -v kdialog &>/dev/null; then
     CHOICE=$(kdialog --title "GFN Sync" --menu "Choose an action:" \
         1 "🔄 Sync Library — Add GFN games to Steam" \
         2 "🧹 Cleanup — Remove GFN shortcuts from Steam" \
-        3 "🎮 Fix Steam Input — Enable controller passthrough" \
+        3 "🎮 Fix Steam Input — (coming soon)" \
         4 "❌ Quit" 2>/dev/null)
 
     case "$CHOICE" in
         1) python3 "$SCRIPT_DIR/gfn_sync_library.py" ;;
         2) python3 "$SCRIPT_DIR/gfn_cleanup.py" ;;
-        3) python3 "$SCRIPT_DIR/gfn_steam_input_fix.py" ;;
+        3) kdialog --title "GFN Sync" --sorry "Steam Input fix is not available yet.\nThis feature is coming in a future update." 2>/dev/null ;;
         *) exit 0 ;;
     esac
 else
@@ -54,7 +54,7 @@ else
     echo ""
     echo "  [1] 🔄 Sync Library — Add GFN games to Steam"
     echo "  [2] 🧹 Cleanup — Remove GFN shortcuts from Steam"
-    echo "  [3] 🎮 Fix Steam Input — Enable controller passthrough"
+    echo "  [3] 🎮 Fix Steam Input — (coming soon)"
     echo "  [4] ❌ Quit"
     echo ""
     read -p "  Your choice [1-4]: " choice
@@ -62,7 +62,7 @@ else
     case "$choice" in
         1) python3 "$SCRIPT_DIR/gfn_sync_library.py" ;;
         2) python3 "$SCRIPT_DIR/gfn_cleanup.py" ;;
-        3) python3 "$SCRIPT_DIR/gfn_steam_input_fix.py" ;;
+        3) echo "  ⚠️  Steam Input fix is not available yet. Coming in a future update." ;;
         *) echo "  Bye!"; exit 0 ;;
     esac
 fi

@@ -8,7 +8,7 @@ Fonctionnalités :
 - Wizard 2 étapes : sélection par store, puis par jeu
 - Écriture des raccourcis dans shortcuts.vdf avec tag "GeForce NOW"
 - Lancement direct des jeux via --url-route (client officiel)
-- Téléchargement optionnel des artworks via SteamGridDB ou images GFN intégrées
+- Récupération automatique des artworks depuis le cache GFN et le CDN NVIDIA
 - Redémarrage automatique de Steam
 
 Prérequis : gfn_common.py dans le même dossier.
@@ -19,7 +19,6 @@ import re
 import subprocess
 import sys
 import time
-import urllib.parse
 
 from gfn_common import (
     detect_gfn_backend,
@@ -39,10 +38,7 @@ from gfn_common import (
     gui_checklist_games,
     is_steam_running,
     restart_steam,
-    load_steamgriddb_key,
-    save_steamgriddb_key,
-    steamgriddb_request,
-    download_file,
+    fetch_native_artworks,
     HAS_KDIALOG,
 )
 
@@ -209,53 +205,6 @@ def write_shortcuts(user_dir, selected_games, all_games, flatpak_id):
     return added_count, created_entries, appid_map
 
 
-def fetch_artworks(user_dir, created_entries, appid_map, api_key):
-    """Télécharge les artworks depuis SteamGridDB pour les jeux créés."""
-    grid_dir = get_grid_dir(user_dir)
-    downloaded = 0
-    total = len(created_entries)
-
-    for i, (app_name, _) in enumerate(created_entries, 1):
-        appid = appid_map.get(app_name)
-        if not appid:
-            continue
-
-        print(f"  [{i}/{total}] Artworks pour : {app_name}...", end="", flush=True)
-
-        # Rechercher le jeu sur SteamGridDB
-        search_term = urllib.parse.quote(app_name)
-        results = steamgriddb_request(f"/search/autocomplete/{search_term}", api_key)
-        if not results:
-            print(" ✗ (non trouvé)")
-            continue
-
-        game_id = results[0].get("id")
-        if not game_id:
-            print(" ✗ (pas d'ID)")
-            continue
-
-        # Télécharger chaque type d'artwork
-        artwork_types = [
-            ("grids", f"{appid}.png"),
-            ("heroes", f"{appid}_hero.png"),
-            ("logos", f"{appid}_logo.png"),
-            ("icons", f"{appid}_icon.png"),
-        ]
-
-        count = 0
-        for art_type, filename in artwork_types:
-            art_data = steamgriddb_request(f"/{art_type}/game/{game_id}", api_key)
-            if art_data and len(art_data) > 0:
-                url = art_data[0].get("url") or art_data[0].get("thumb")
-                if url:
-                    dest = os.path.join(grid_dir, filename)
-                    if download_file(url, dest):
-                        count += 1
-
-        print(f" ✓ ({count}/4 images)")
-        downloaded += count
-
-    return downloaded
 
 
 def main():
@@ -333,14 +282,19 @@ def main():
     steam_was_running = is_steam_running()
     if steam_was_running:
         print("[*] Fermeture de Steam (nécessaire pour écrire shortcuts.vdf)...")
-        subprocess.run(["killall", "steam"], capture_output=True)
-        # Attendre que Steam soit complètement arrêté
-        for _ in range(30):
-            result = subprocess.run(["pgrep", "-x", "steam"], capture_output=True)
-            if result.returncode != 0:
+        # Tentative d'arrêt propre
+        subprocess.run(["steam", "-shutdown"], capture_output=True, timeout=5)
+        time.sleep(3)
+        # Forcer si Steam tourne toujours
+        if is_steam_running():
+            subprocess.run(["killall", "-9", "steam"], capture_output=True)
+            time.sleep(2)
+        # Attendre la fin complète
+        for _ in range(20):
+            if not is_steam_running():
                 break
             time.sleep(0.5)
-        time.sleep(2)  # Marge de sécurité
+        time.sleep(2)  # Laisser le filesystem se synchroniser
         print("[✓] Steam fermé.\n")
 
     # ── Étape 6 : Écriture des raccourcis ──
@@ -355,24 +309,48 @@ def main():
     if os.path.exists(shortcuts_path):
         file_size = os.path.getsize(shortcuts_path)
         print(f"[✓] Fichier vérifié : {shortcuts_path} ({file_size} octets)")
+        # Relire pour vérifier l'intégrité
+        with open(shortcuts_path, "rb") as f:
+            verify_data = f.read()
+        verify_vdf = parse_binary_vdf(verify_data)
+        if verify_vdf and "shortcuts" in verify_vdf:
+            n = len(verify_vdf["shortcuts"])
+            print(f"[✓] {n} raccourci(s) total dans le fichier.")
+        else:
+            print("[!] ATTENTION : Le fichier VDF semble corrompu après écriture !")
     else:
         print(f"[!] ATTENTION : Le fichier n'a pas été créé : {shortcuts_path}")
 
-    # ── Étape 7 : Artworks SteamGridDB (optionnel) ──
-    api_key = load_steamgriddb_key()
-    if not api_key:
-        if gui_yesno("Artworks (Optionnel)",
-                     "Voulez-vous télécharger les visuels des jeux via SteamGridDB ?\n"
-                     "(Nécessite une clé API gratuite depuis steamgriddb.com)"):
-            api_key = gui_input("Clé API SteamGridDB",
-                                "Collez votre clé API SteamGridDB :")
-            if api_key:
-                save_steamgriddb_key(api_key)
+    # ── Étape 7 : Artworks natifs GFN ──
+    if all_created:
+        print(f"\n[*] Récupération des artworks natifs GFN...")
+        native_count, _ = fetch_native_artworks(
+            user_dir, all_created, all_appid_maps, all_games, flatpak_id
+        )
+        print(f"[✓] {native_count} images récupérées.")
 
-    if api_key and all_created:
-        print(f"\n[*] Téléchargement des artworks SteamGridDB...")
-        dl_count = fetch_artworks(user_dir, all_created, all_appid_maps, api_key)
-        print(f"[✓] {dl_count} images téléchargées.\n")
+        # Patcher le champ 'icon' dans shortcuts.vdf avec l'image grid
+        grid_dir = get_grid_dir(user_dir)
+        with open(shortcuts_path, "rb") as f:
+            vdf_data = parse_binary_vdf(f.read())
+        if vdf_data and "shortcuts" in vdf_data:
+            patched = 0
+            for _idx, sc in vdf_data["shortcuts"].items():
+                sc_appid = sc.get("appid", 0) & 0xFFFFFFFF
+                if not sc.get("icon"):
+                    # Chercher une image grid existante
+                    for ext in [".jpg", ".png", ".webp"]:
+                        icon_path = os.path.join(grid_dir, f"{sc_appid}{ext}")
+                        if os.path.exists(icon_path):
+                            sc["icon"] = icon_path
+                            patched += 1
+                            break
+            if patched:
+                with open(shortcuts_path, "wb") as f:
+                    f.write(write_binary_vdf(vdf_data))
+                print(f"[✓] {patched} icône(s) ajoutée(s) dans shortcuts.vdf.\n")
+            else:
+                print()
 
     # ── Étape 8 : Résumé + Relancement de Steam ──
     summary = (

@@ -55,19 +55,23 @@ echo "[*] Installing to $INSTALL_DIR ..."
 mkdir -p "$INSTALL_DIR"
 mkdir -p "$INSTALL_DIR/vdf"
 
-# Copy Python scripts
-cp "$SCRIPT_DIR/gfn_common.py" "$INSTALL_DIR/"
-cp "$SCRIPT_DIR/gfn_sync_library.py" "$INSTALL_DIR/"
-cp "$SCRIPT_DIR/gfn_cleanup.py" "$INSTALL_DIR/"
-cp "$SCRIPT_DIR/gfn_steam_input_fix.py" "$INSTALL_DIR/"
+if [[ "$SCRIPT_DIR" != "$INSTALL_DIR" ]]; then
+    # Copy Python scripts
+    cp "$SCRIPT_DIR/gfn_common.py" "$INSTALL_DIR/"
+    cp "$SCRIPT_DIR/gfn_sync_library.py" "$INSTALL_DIR/"
+    cp "$SCRIPT_DIR/gfn_cleanup.py" "$INSTALL_DIR/"
+    cp "$SCRIPT_DIR/gfn_steam_input_fix.py" "$INSTALL_DIR/"
 
-# Copy VDF module
-cp "$SCRIPT_DIR/vdf/__init__.py" "$INSTALL_DIR/vdf/"
-cp "$SCRIPT_DIR/vdf/vdict.py" "$INSTALL_DIR/vdf/"
+    # Copy VDF module
+    cp "$SCRIPT_DIR/vdf/__init__.py" "$INSTALL_DIR/vdf/"
+    cp "$SCRIPT_DIR/vdf/vdict.py" "$INSTALL_DIR/vdf/"
 
-# Copy launcher and desktop entry
-cp "$SCRIPT_DIR/gfn-sync.sh" "$INSTALL_DIR/"
-cp "$SCRIPT_DIR/gfn-sync.desktop" "$INSTALL_DIR/"
+    # Copy launcher and desktop entry
+    cp "$SCRIPT_DIR/gfn-sync.sh" "$INSTALL_DIR/"
+    cp "$SCRIPT_DIR/gfn-sync.desktop" "$INSTALL_DIR/"
+else
+    echo "  [~] Already in $INSTALL_DIR, skipping copy."
+fi
 
 # Make scripts executable
 chmod +x "$INSTALL_DIR/gfn-sync.sh"
@@ -77,6 +81,9 @@ chmod +x "$INSTALL_DIR/"*.py 2>/dev/null || true
 echo "[*] Installing menu shortcut ..."
 mkdir -p "$DESKTOP_DIR"
 cp "$INSTALL_DIR/gfn-sync.desktop" "$DESKTOP_DIR/"
+chmod +x "$DESKTOP_DIR/gfn-sync.desktop"
+# Refresh KDE menu cache
+update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
 
 # ── Success ──
 echo ""
