@@ -16,7 +16,7 @@ Security and privacy are taken seriously in this project, especially since the t
 If you discover a security vulnerability within GFN Sync, please **do not** open a public issue. Instead, please report it privately.
 
 **How to report:**
-1. Send an email to [vincentredor@gmail.com] or reach out via direct message on X/Twitter (@supernebuleux).
+1. Reach out via direct message on X/Twitter (@supernebuleux).
 2. Include a detailed description of the vulnerability, the steps to reproduce it, and the potential impact.
 
 You should receive a response within 48 hours. If the vulnerability is confirmed, a patch will be developed and released as quickly as possible.
