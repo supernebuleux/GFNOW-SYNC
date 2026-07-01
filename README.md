@@ -1,3 +1,5 @@
+![GFN Sync Banner](banner.jpg)
+
 # 🎮 GFN Sync
 
 **Automatically sync your GeForce NOW library to Steam on SteamOS.**
